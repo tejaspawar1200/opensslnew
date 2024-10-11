@@ -42,9 +42,8 @@
  * @returns 1 if there is enough bytes remaining to be able to skip forward,
  *          or 0 otherwise.
  */
-static ossl_inline int PACKET_get_bytes_shallow(PACKET *pkt,
-                                                unsigned char **out,
-                                                size_t len)
+static ossl_unused ossl_inline
+int PACKET_get_bytes_shallow(PACKET *pkt, unsigned char **out, size_t len)
 {
     const unsigned char **data = (const unsigned char **)out;
 
@@ -64,7 +63,8 @@ static ossl_inline int PACKET_get_bytes_shallow(PACKET *pkt,
  * @param data The object to write the data to.
  * @returns 1 on success, or 0 otherwise.
  */
-static ossl_inline int PACKET_get_4_len(PACKET *pkt, uint32_t *data)
+static ossl_unused ossl_inline
+int PACKET_get_4_len(PACKET *pkt, uint32_t *data)
 {
     size_t i = 0;
     int ret = PACKET_get_net_4_len(pkt, &i);

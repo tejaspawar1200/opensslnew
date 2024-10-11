@@ -112,10 +112,9 @@ int ossl_lms_key_valid(const LMS_KEY *key, int selection)
     if (key == NULL)
         return 0;
 
-    if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0) {
+    if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0)
         if (key->pub.encoded == NULL || key->pub.encodedlen == 0)
             return 0;
-    }
     /* There is no private key currently */
     return 1;
 }

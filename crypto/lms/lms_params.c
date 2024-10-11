@@ -47,9 +47,8 @@ const LMS_PARAMS *ossl_lms_params_get(uint32_t lms_type)
 {
     const LMS_PARAMS *p;
 
-    for (p = lms_params; p->lms_type != 0; ++p) {
+    for (p = lms_params; p->lms_type != 0; ++p)
         if (p->lms_type == lms_type)
             return p;
-    }
     return NULL;
 }
