@@ -22,7 +22,7 @@ static int lm_ots_compute_pubkey_final(EVP_MD_CTX *ctx, EVP_MD_CTX *ctxIq,
  * and public key parameters.
  *
  * @param ctx A temporary working EVP_MD_CTX object.
- * @param ctxIq A EVP_MD_CTX object that has been initialized with a digest,
+ * @param ctxIq A EVP_MD_CTX object that has been initialised with a digest,
  *              that returns a non finalized value of H(I || q)
  * @param sig An LM_OTS_SIG object that contains C and y
  * @param pub The public key LM_OTS_PARAMS
@@ -67,8 +67,8 @@ err:
  */
 static ossl_inline void INC16(unsigned char *tag)
 {
-    if ((tag[1] = tag[1] + 1) == 0)
-        *tag = *tag + 1;
+    if (++(tag[1]) == 0)
+        ++*tag;
 }
 
 /*
