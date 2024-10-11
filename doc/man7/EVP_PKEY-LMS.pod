@@ -7,7 +7,7 @@ EVP_PKEY-LMS, EVP_KEYMGMT-LMS, LMS
 
 =head1 DESCRIPTION
 
-The B<LMS> keytype is implemented in OpenSSL's default provider.
+The B<LMS> keytype is implemented in OpenSSL's default and FIPS providers.
 
 =head2 Common LMS parameters
 
