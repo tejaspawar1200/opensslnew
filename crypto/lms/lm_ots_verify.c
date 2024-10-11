@@ -81,6 +81,7 @@ static ossl_inline void INC16(unsigned char *tag)
  *            Q = H(I || u32str(q) || u16str(D_MESG) || C || msg)
  *            This ctx is reused for other calculations.
  * @param ctxIq A EVP_MD_CTX object that contains a non finalized value of H(I || q).
+ * @param sig An object that containing LM_OTS signature data.
  * @param Kc The computed public key. It is assumed the size is n.
  * @returns 1 on success, or 0 otherwise.
  */
@@ -119,6 +120,11 @@ static int lm_ots_compute_pubkey_final(EVP_MD_CTX *ctx, EVP_MD_CTX *ctxIq,
     tag[0] = 0;
     tag[1] = 0;
 
+    /*
+     * Depending on the lm_ots_type (see lm_ots_params[])
+     * The outer loop |p| ranges from 26...265 iterations and
+     * the inner loop |end| is in the range 0...(2^w)-1
+     */
     for (i = 0; i < p; ++i) {
         a = coef(Q, i, w);
         memcpy(z, y, n);

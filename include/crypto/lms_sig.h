@@ -10,6 +10,9 @@
 /*
  * Internal LMS/LM_OTS functions for other submodules,
  * not for application use
+ *
+ * Refer to RFC 8554 Sections 5.4 & 4.5 for information related to
+ * LMS Signatures & LM_OTS Signature Generation respectively.
  */
 
 #ifndef OSSL_CRYPTO_LMS_SIG_H
@@ -25,21 +28,29 @@ extern const uint16_t OSSL_LMS_D_MESG;      /* 8181 */
 extern const uint16_t OSSL_LMS_D_LEAF;      /* 8282 */
 extern const uint16_t OSSL_LMS_D_INTR;      /* 8383 */
 
-/* Used by OTS signature when doing Q || Cksm(Q) */
+/* Used by OTS signature when calculating Q || Cksm(Q) */
 #  define LMS_SIZE_CHECKSUM 2
 #  define LMS_SIZE_QSUM 2
 
+/*
+ * An object for storing a One-Time Signature
+ * See RFC 8554 Section 4.5
+ */
 typedef struct lm_ots_sig_st {
     const LM_OTS_PARAMS *params;
     /* For verify operations the following pointers are not allocated */
-    unsigned char *C; /* size is n */
-    unsigned char *y; /* size is p * n */
+    unsigned char *C; /* A salt value of size n */
+    unsigned char *y; /* The trailing part of a signature of size p * n */
 } LM_OTS_SIG;
 
+/*
+ * An object for storing a LMS signature
+ * See RFC 8554 Section 5.4
+ */
 typedef struct lms_signature_st {
     uint32_t q;
     LM_OTS_SIG sig;
-    const LMS_PARAMS *params;
+    const LMS_PARAMS *params; /* contains the LMS type */
     unsigned char *paths; /* size is h * m */
 } LMS_SIG;
 
