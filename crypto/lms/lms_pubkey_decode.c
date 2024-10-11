@@ -128,9 +128,9 @@ int ossl_lms_pubkey_from_params(const OSSL_PARAM params[], LMS_KEY *lmskey)
 
     p = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_ENCODED_PUBLIC_KEY);
     if (p != NULL) {
-        if (p->data == NULL || p->data_type != OSSL_PARAM_OCTET_STRING)
-            return 0;
-        if (!ossl_lms_pubkey_decode(p->data, p->data_size, lmskey))
+        if (p->data == NULL
+                || p->data_type != OSSL_PARAM_OCTET_STRING
+                || !ossl_lms_pubkey_decode(p->data, p->data_size, lmskey))
             return 0;
     }
     return 1;
