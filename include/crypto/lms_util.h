@@ -10,6 +10,9 @@
 /* @brief Internal LMS internal helper functions */
 
 #include "internal/packet.h"
+#include <openssl/params.h>
+#include <openssl/core_names.h>
+#include <openssl/evp.h>
 
 /*
  * This LMS implementation assumes that the hash algorithm must be the same for
@@ -78,7 +81,8 @@ int PACKET_get_4_len(PACKET *pkt, uint32_t *data)
  * See RFC 8554 Section 3.1.3: Strings of w-bit Elements
  * w: Is one of {1,2,4,8}
  */
-static ossl_inline uint8_t coef(const unsigned char *S, uint16_t i, uint8_t w)
+static ossl_unused ossl_inline
+uint8_t coef(const unsigned char *S, uint16_t i, uint8_t w)
 {
     uint8_t bitmask = (1 << w) - 1;
     uint8_t shift = 8 - (w * (i % (8 / w)) + w);
@@ -87,11 +91,9 @@ static ossl_inline uint8_t coef(const unsigned char *S, uint16_t i, uint8_t w)
     return (S[id] >> shift) & bitmask;
 }
 
-#include <openssl/params.h>
-#include <openssl/core_names.h>
-#include <openssl/evp.h>
-static ossl_inline int evp_md_ctx_init(EVP_MD_CTX *ctx, const EVP_MD *md,
-                                       const LMS_PARAMS *lms_params)
+static ossl_unused ossl_inline
+int evp_md_ctx_init(EVP_MD_CTX *ctx, const EVP_MD *md,
+                    const LMS_PARAMS *lms_params)
 {
     OSSL_PARAM params[2] = { OSSL_PARAM_END, OSSL_PARAM_END };
     OSSL_PARAM *p = NULL;
