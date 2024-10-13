@@ -95,20 +95,20 @@ L<X509_LOOKUP_METHOD(3)> I<meth> and adds it to the B<X509_STORE>
 I<store>.  This also associates the B<X509_STORE> with the lookup, so
 B<X509_LOOKUP> functions can look up objects in that store.
 
-X509_STORE_load_file_ex() loads trusted certificate(s) into an
-B<X509_STORE> from a given file. The library context I<libctx> and property
+X509_STORE_load_file_ex() loads trusted certificate(s) into an B<X509_STORE>
+from a given file in PEM format. The library context I<libctx> and property
 query I<propq> are used when fetching algorithms from providers.
 
 X509_STORE_load_file() is similar to X509_STORE_load_file_ex() but
 uses NULL for the library context I<libctx> and property query I<propq>.
 
 X509_STORE_load_path() loads trusted certificate(s) into an
-B<X509_STORE> from a given directory path.
+B<X509_STORE> from a given directory with files in PEM format.
 The certificates in the directory must be in hashed form, as
 documented in L<X509_LOOKUP_hash_dir(3)>.
 
-X509_STORE_load_store_ex() loads trusted certificate(s) into an
-B<X509_STORE> from a store at a given URI. The library context I<libctx> and
+X509_STORE_load_store_ex() loads trusted certificate(s) into an B<X509_STORE>
+from a store in PEM format at a given URI. The library context I<libctx> and
 property query I<propq> are used when fetching algorithms from providers.
 
 X509_STORE_load_store() is similar to X509_STORE_load_store_ex() but
@@ -117,8 +117,7 @@ uses NULL for the library context I<libctx> and property query I<propq>.
 X509_STORE_load_locations_ex() combines
 X509_STORE_load_file_ex() and X509_STORE_load_path() for a given file
 and/or directory path.
-It is permitted to specify just a file, just a directory, or both
-paths.
+It is permitted to specify just a file, just a directory, or both paths.
 
 X509_STORE_load_locations() is similar to X509_STORE_load_locations_ex()
 but uses NULL for the library context I<libctx> and property query I<propq>.

@@ -27,18 +27,20 @@ SSL_CTX_set_default_verify_store, SSL_CTX_load_verify_locations
 
 =head1 DESCRIPTION
 
-SSL_CTX_load_verify_locations(), SSL_CTX_load_verify_dir(),
-SSL_CTX_load_verify_file(), SSL_CTX_load_verify_store() specifies the
-locations for B<ctx>, at which CA certificates for verification purposes
-are located. The certificates available via B<CAfile>, B<CApath> and
-B<CAstore> are trusted. B<ctx> B<MUST NOT> be NULL
+SSL_CTX_load_verify_dir(), SSL_CTX_load_verify_file(),
+SSL_CTX_load_verify_store(), and SSL_CTX_load_verify_locations() specify
+the locations at which trusted CA certificates in PEM format are located.
+For details see the L</NOTES> below.
+The SSL context B<ctx> B<MUST NOT> be NULL.
 
 Details of the certificate verification and chain checking process are
 described in L<openssl-verification-options(1)/Certification Path Validation>.
 
-SSL_CTX_set_default_verify_paths() specifies that the default locations from
-which CA certificates are loaded should be used. There is one default directory,
-one default file and one default store.
+SSL_CTX_set_default_verify_paths() specifies the default locations from
+which trusted CA certificates in PEM format are loaded when needed.
+For details see the L</NOTES> below.
+
+There is one default directory, one default file, and one default store.
 The default CA certificates directory is called F<certs> in the default OpenSSL
 directory, and this is also the default store.
 Alternatively the B<SSL_CERT_DIR> environment variable can be defined to
@@ -62,6 +64,15 @@ SSL_CTX_set_default_verify_paths() except that just the default store is
 used.
 
 =head1 NOTES
+
+The CA certificates specified by calling the above functions are used
+as trust anchors for peer certificate verification purposes unless overridden
+by L<SSL_CTX_set0_verify_cert_store(3)>, L<SSL_CTX_set1_verify_cert_store(3)>,
+by L<SSL_set0_verify_cert_store(3)>, or L<SSL_set1_verify_cert_store(3)>.
+They are used as trust anchors for
+building the chain of the own client/server certificate unless overridden
+by L<SSL_CTX_set0_chain_cert_store(3)>, L<SSL_CTX_set1_chain_cert_store(3)>,
+L<SSL_set0_chain_cert_store(3)>, or L<SSL_set1_chain_cert_store(3)>.
 
 If B<CAfile> is not NULL, it points to a file of CA certificates in PEM
 format. The file can contain several CA certificates identified by
@@ -163,6 +174,14 @@ for use as B<CApath>:
 =head1 SEE ALSO
 
 L<ssl(7)>,
+L<SSL_CTX_set0_verify_cert_store(3)>,
+L<SSL_CTX_set1_verify_cert_store(3)>,
+L<SSL_CTX_set0_chain_cert_store(3)>,
+L<SSL_CTX_set1_chain_cert_store(3)>,
+L<SSL_set0_verify_cert_store(3)>,
+L<SSL_set1_verify_cert_store(3)>,
+L<SSL_set0_chain_cert_store(3)>,
+L<SSL_set1_chain_cert_store(3)>,
 L<SSL_CTX_set_client_CA_list(3)>,
 L<SSL_get_client_CA_list(3)>,
 L<SSL_CTX_use_certificate(3)>,
