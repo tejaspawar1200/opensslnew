@@ -1899,7 +1899,7 @@ int s_client_main(int argc, char **argv)
                          vfyCApath, vfyCAfile, vfyCAstore,
                          chCApath, chCAfile, chCAstore,
                          crls, crl_download)) {
-        BIO_printf(bio_err, "Error loading locations for server cert verificationi and client cert chain building\n");
+        BIO_printf(bio_err, "Error loading locations for server cert verification and client cert chain building\n");
         ERR_print_errors(bio_err);
         goto end;
     }

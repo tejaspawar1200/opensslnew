@@ -321,26 +321,32 @@ Limit verify output to only errors.
 
 =item B<-CAfile> I<file>
 
-A file in PEM format containing trusted CA certificates.
+A file in PEM format containing one or more trusted CA certificates.
+They are used as trust anchors when verifying the server's certificate unless
+overridden by B<-verifyCAfile>, B<-verifyCApath>, or B<-verifyCAstore> options.
+They are used as trust anchors when attempting
+to build the client certificate chain provided to the server unless
+overridden by B<-chainCAfile>, B<-chainCApath>, or B<-chainCAstore> options.
 
 =item B<-CApath> I<directory>
 
-A directory with files in PEM format containing trusted CA certificates.
+A directory with files in PEM format, each containing a trusted CA certificate
+for the same purposes as specified with the B<-CAfile> option.
 This directory must be in "hash format",
-see L<openssl-verify(1)> for more information.
+see L<openssl-rehash(1)> for more information.
 
 =item B<-CAstore> I<uri>
 
-The URI of a store containing trusted CA certificates in PEM format.
+The URI of a store containing trusted CA certificates in PEM format
+for the same purposes as specified with the B<-CAfile> option.
 The URI may indicate a single certificate, as well as a collection of them.
-With URIs in the C<file:> scheme, this acts as B<-CAfile> or
-B<-CApath>, depending on if the URI indicates a directory or a
-single file.
-See L<ossl_store-file(7)> for more information on the C<file:> scheme.
+With URIs in the C<file:> scheme, this is generally treated like B<-CApath> or
+B<-CAfile>, depending on if the URI indicates a directory or a single file.
+See L<openssl-rehash(1)> for more information on the C<file:> scheme.
 
 =item B<-verifyCAfile> I<filename>
 
-A file in PEM format containing CA certificates
+A file in PEM format containing one or more CA certificates
 to trust for verifying the server's certificate.
 
 =item B<-verifyCApath> I<dir>, B<-CApath> I<dir>
@@ -355,14 +361,13 @@ see L<openssl-verify(1)> for more information.
 URI of a store containing CA certificates.
 to trust for verifying the server's certificate.
 The URI may indicate a single certificate, as well as a collection of them.
-With URIs in the C<file:> scheme, this acts as B<-verifyCAfile> or
-B<-verifyCApath>, depending on if the URI indicates a directory or a
-single file.
+With URIs in the C<file:> scheme, this is generally treated like B<-CApath> or
+B<-CAfile>, depending on if the URI indicates a directory or a single file.
 See L<ossl_store-file(7)> for more information on the C<file:> scheme.
 
 =item B<-chainCAfile> I<file>
 
-A file in PEM format containing trusted CA certificates to use
+A file in PEM format containing one or more trusted CA certificates to use
 when attempting to build the client certificate chain provided to the server.
 
 =item B<-chainCApath> I<directory>
@@ -377,9 +382,8 @@ see L<openssl-verify(1)> for more information.
 The URI of a store containing trusted certificates to use
 when attempting to build the client certificate chain provided to the server.
 The URI may indicate a single certificate, as well as a collection of them.
-With URIs in the C<file:> scheme, this acts as B<-chainCAfile> or
-B<-chainCApath>, depending on if the URI indicates a directory or a
-single file.
+With URIs in the C<file:> scheme, this is generally treated like B<-CApath> or
+B<-CAfile>, depending on if the URI indicates a directory or a single file.
 See L<ossl_store-file(7)> for more information on the C<file:> scheme.
 
 =item B<-requestCAfile> I<file>
