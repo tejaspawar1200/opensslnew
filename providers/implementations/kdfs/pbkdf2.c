@@ -207,9 +207,9 @@ static int pbkdf2_lower_bound_check_passed(int saltlen, uint64_t iter,
                                            int *error, const char **desc)
 {
     if (passlen < KDF_PBKDF2_MIN_PASSWORD_LEN) {
-        *error = PROV_R_KEY_SIZE_TOO_SMALL;
+        *error = PROV_R_PASSWORD_STRENGTH_TOO_WEAK;
         if (desc != NULL)
-            *desc = "Password size";
+            *desc = "Weak password";
         return 0;
     }
     if ((keylen * 8) < KDF_PBKDF2_MIN_KEY_LEN_BITS) {
