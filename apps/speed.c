@@ -1445,6 +1445,24 @@ static int SIG_verify_loop(void *args)
     return count;
 }
 
+static int check_block_size(EVP_CIPHER_CTX *ctx, int length)
+{
+    const EVP_CIPHER *ciph = EVP_CIPHER_CTX_get0_cipher(ctx);
+    int blocksize = EVP_CIPHER_CTX_get_block_size(ctx);
+
+    if (ciph == NULL || blocksize <= 0) {
+        BIO_printf(bio_err, "\nInvalid cipher!\n");
+        return 0;
+    }
+    if (length % blocksize != 0) {
+        BIO_printf(bio_err,
+                   "\nRequested encryption length not a multiple of block size for %s!\n",
+                   EVP_CIPHER_get0_name(ciph));
+        return 0;
+    }
+    return 1;
+}
+
 static int run_benchmark(int async_jobs,
                          int (*loop_function) (void *), loopargs_t *loopargs)
 {
@@ -2624,13 +2642,13 @@ int speed_main(int argc, char **argv)
     if (doit[D_HMAC]) {
         static const char hmac_key[] = "This is a key...";
         int len = strlen(hmac_key);
+        size_t hmac_name_len = sizeof("hmac()") + strlen(evp_mac_mdname);
         OSSL_PARAM params[3];
 
         if (evp_mac_mdname == NULL)
             goto end;
-        evp_hmac_name = app_malloc(sizeof("hmac()") + strlen(evp_mac_mdname),
-                                   "HMAC name");
-        sprintf(evp_hmac_name, "hmac(%s)", evp_mac_mdname);
+        evp_hmac_name = app_malloc(hmac_name_len, "HMAC name");
+        BIO_snprintf(evp_hmac_name, hmac_name_len, "hmac(%s)", evp_mac_mdname);
         names[D_HMAC] = evp_hmac_name;
 
         params[0] =
@@ -2665,6 +2683,8 @@ int speed_main(int argc, char **argv)
         }
         algindex = D_CBC_DES;
         for (testnum = 0; st && testnum < size_num; testnum++) {
+            if (!check_block_size(loopargs[0].ctx, lengths[testnum]))
+                break;
             print_message(names[D_CBC_DES], lengths[testnum], seconds.sym);
             Time_F(START);
             count = run_benchmark(async_jobs, EVP_Cipher_loop, loopargs);
@@ -2685,6 +2705,8 @@ int speed_main(int argc, char **argv)
         }
         algindex = D_EDE3_DES;
         for (testnum = 0; st && testnum < size_num; testnum++) {
+            if (!check_block_size(loopargs[0].ctx, lengths[testnum]))
+                break;
             print_message(names[D_EDE3_DES], lengths[testnum], seconds.sym);
             Time_F(START);
             count =
@@ -2709,6 +2731,8 @@ int speed_main(int argc, char **argv)
             }
 
             for (testnum = 0; st && testnum < size_num; testnum++) {
+                if (!check_block_size(loopargs[0].ctx, lengths[testnum]))
+                    break;
                 print_message(names[algindex], lengths[testnum], seconds.sym);
                 Time_F(START);
                 count =
@@ -2734,6 +2758,8 @@ int speed_main(int argc, char **argv)
             }
 
             for (testnum = 0; st && testnum < size_num; testnum++) {
+                if (!check_block_size(loopargs[0].ctx, lengths[testnum]))
+                    break;
                 print_message(names[algindex], lengths[testnum], seconds.sym);
                 Time_F(START);
                 count =
@@ -2758,6 +2784,8 @@ int speed_main(int argc, char **argv)
             }
 
             for (testnum = 0; st && testnum < size_num; testnum++) {
+                if (!check_block_size(loopargs[0].ctx, lengths[testnum]))
+                    break;
                 print_message(names[algindex], lengths[testnum], seconds.sym);
                 Time_F(START);
                 count =
@@ -2894,6 +2922,7 @@ int speed_main(int argc, char **argv)
     }
 
     if (doit[D_EVP_CMAC]) {
+        size_t len = sizeof("cmac()") + strlen(evp_mac_ciphername);
         OSSL_PARAM params[3];
         EVP_CIPHER *cipher = NULL;
 
@@ -2906,9 +2935,8 @@ int speed_main(int argc, char **argv)
             BIO_printf(bio_err, "\nRequested CMAC cipher with unsupported key length.\n");
             goto end;
         }
-        evp_cmac_name = app_malloc(sizeof("cmac()")
-                                   + strlen(evp_mac_ciphername), "CMAC name");
-        sprintf(evp_cmac_name, "cmac(%s)", evp_mac_ciphername);
+        evp_cmac_name = app_malloc(len, "CMAC name");
+        BIO_snprintf(evp_cmac_name, len, "cmac(%s)", evp_mac_ciphername);
         names[D_EVP_CMAC] = evp_cmac_name;
 
         params[0] = OSSL_PARAM_construct_utf8_string(OSSL_ALG_PARAM_CIPHER,
