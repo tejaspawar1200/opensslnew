@@ -3374,11 +3374,14 @@ static void ch_on_idle_timeout(QUIC_CHANNEL *ch)
  * @param peer     Address of the peer to which the channel connects.
  * @param peer_scid Peer-specified source connection ID.
  * @param peer_dcid Peer-specified destination connection ID.
+ * @param peer_odcid Peer-specified original destination connection ID
+ *                   may be NULL if retry frame not sent to client
  * @return         1 on success, 0 on failure to set required elements.
  */
 static int ch_on_new_conn_common(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
                                  const QUIC_CONN_ID *peer_scid,
-                                 const QUIC_CONN_ID *peer_dcid)
+                                 const QUIC_CONN_ID *peer_dcid,
+                                 const QUIC_CONN_ID *peer_odcid)
 {
     /* Note our newly learnt peer address and CIDs. */
     ch->cur_peer_addr   = *peer;
@@ -3409,7 +3412,9 @@ static int ch_on_new_conn_common(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
         return 0;
 
     /* Register the peer ODCID in the LCIDM. */
-    if (!ossl_quic_lcidm_enrol_odcid(ch->lcidm, ch, &ch->init_dcid))
+    if (!ossl_quic_lcidm_enrol_odcid(ch->lcidm, ch, peer_odcid == NULL ?
+                                                    &ch->init_dcid :
+                                                    peer_odcid))
         return 0;
 
     /* Change state. */
@@ -3430,7 +3435,7 @@ int ossl_quic_channel_on_new_conn(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
     if (!ossl_quic_lcidm_generate_initial(ch->lcidm, ch, &ch->cur_local_cid))
         return 0;
 
-    return ch_on_new_conn_common(ch, peer, peer_scid, peer_dcid);
+    return ch_on_new_conn_common(ch, peer, peer_scid, peer_dcid, NULL);
 }
 
 int ossl_quic_bind_channel(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
@@ -3452,7 +3457,7 @@ int ossl_quic_bind_channel(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
      * peer_odcid <=> is initial dst conn id chosen by peer in its
      * first initial packet we received without token.
      */
-    return ch_on_new_conn_common(ch, peer, peer_scid, peer_odcid);
+    return ch_on_new_conn_common(ch, peer, peer_scid, peer_dcid, peer_odcid);
 }
 
 SSL *ossl_quic_channel_get0_ssl(QUIC_CHANNEL *ch)
