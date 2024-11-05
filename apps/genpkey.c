@@ -110,7 +110,7 @@ int write_to_file(BIO *in, const char *filename, int format, int private)
     BUF_MEM *mem_buffer = NULL;
 
     rv = BIO_get_mem_ptr(in, &mem_buffer);
-    if (rv < 0) {
+    if (rv <= 0) {
         BIO_puts(bio_err, "Error reading mem buffer\n");
         goto end;
     }
@@ -118,7 +118,7 @@ int write_to_file(BIO *in, const char *filename, int format, int private)
     if (out == NULL)
         goto end;
     rv = BIO_write(out, mem_buffer->data, mem_buffer->length);
-    if (rv < 0)
+    if (rv < 0 || (size_t)rv != mem_buffer->length)
         BIO_puts(bio_err, "Error writing to output file\n");
     else
         ret = 0;
@@ -287,15 +287,13 @@ int genpkey_main(int argc, char **argv)
     } else if (outformat == FORMAT_PEM) {
         assert(private);
         rv = PEM_write_bio_PrivateKey(mem_out, pkey, cipher, NULL, 0, NULL, pass);
-        if (rv > 0 && mem_outpubkey != NULL) {
+        if (rv > 0 && mem_outpubkey != NULL)
             rv = PEM_write_bio_PUBKEY(mem_outpubkey, pkey);
-        }
     } else if (outformat == FORMAT_ASN1) {
         assert(private);
         rv = i2d_PrivateKey_bio(mem_out, pkey);
-        if (rv > 0 && mem_outpubkey != NULL) {
+        if (rv > 0 && mem_outpubkey != NULL)
             rv = i2d_PUBKEY_bio(mem_outpubkey, pkey);
-        }
     } else {
         BIO_printf(bio_err, "Bad format specified for key\n");
         goto end;
@@ -325,12 +323,16 @@ int genpkey_main(int argc, char **argv)
     if (ret != 0) {
         ERR_print_errors(bio_err);
     } else {
-        rv = write_to_file(mem_outpubkey, outpubkeyfile, outformat, private);
-        if (rv < 0)
-            BIO_puts(bio_err, "Error writing to outpubkey\n");
-        rv = write_to_file(mem_out, outfile, outformat, private);
-        if (rv < 0)
-            BIO_puts(bio_err, "Error writing to outfile\n");
+        if (mem_outpubkey != NULL) {
+            rv = write_to_file(mem_outpubkey, outpubkeyfile, outformat, private);
+            if (rv < 0)
+                BIO_puts(bio_err, "Error writing to outpubkey\n");
+        }
+        if (mem_out != NULL) {
+            rv = write_to_file(mem_out, outfile, outformat, private);
+            if (!rv)
+                BIO_puts(bio_err, "Error writing to outfile\n");
+        }
     }
     EVP_PKEY_free(pkey);
     EVP_PKEY_CTX_free(ctx);
