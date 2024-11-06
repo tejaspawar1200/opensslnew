@@ -103,32 +103,6 @@ cleanup:
     EVP_PKEY_CTX_free(ctx);
 }
 
-int write_to_file(BIO *in, const char *filename, int format, int private)
-{
-    int rv = 0, ret = 0;
-    BIO *out = NULL;
-    BUF_MEM *mem_buffer = NULL;
-
-    rv = BIO_get_mem_ptr(in, &mem_buffer);
-    if (rv <= 0) {
-        BIO_puts(bio_err, "Error reading mem buffer\n");
-        goto end;
-    }
-    out = bio_open_owner(filename, format, private);
-    if (out == NULL)
-        goto end;
-    rv = BIO_write(out, mem_buffer->data, mem_buffer->length);
-    if (rv < 0 || (size_t)rv != mem_buffer->length)
-        BIO_puts(bio_err, "Error writing to output file\n");
-    else
-        ret = 0;
-end:
-    if (ret != 0)
-        ERR_print_errors(bio_err);
-    BIO_free_all(out);
-    return ret;
-}
-
 int genpkey_main(int argc, char **argv)
 {
     CONF *conf = NULL;
@@ -324,12 +298,12 @@ int genpkey_main(int argc, char **argv)
         ERR_print_errors(bio_err);
     } else {
         if (mem_outpubkey != NULL) {
-            rv = write_to_file(mem_outpubkey, outpubkeyfile, outformat, private);
-            if (rv < 0)
+            rv = mem_bio_to_file(mem_outpubkey, outpubkeyfile, outformat, private);
+            if (!rv)
                 BIO_puts(bio_err, "Error writing to outpubkey\n");
         }
         if (mem_out != NULL) {
-            rv = write_to_file(mem_out, outfile, outformat, private);
+            rv = mem_bio_to_file(mem_out, outfile, outformat, private);
             if (!rv)
                 BIO_puts(bio_err, "Error writing to outfile\n");
         }
