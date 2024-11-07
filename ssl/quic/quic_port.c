@@ -30,6 +30,14 @@ static void port_default_packet_handler(QUIC_URXE *e, void *arg,
                                         const QUIC_CONN_ID *dcid);
 static void port_rx_pre(QUIC_PORT *port);
 
+struct validation_token {
+    char token_buf[sizeof("openssltoken") - 1];
+    QUIC_CONN_ID token_odcid;
+	/* this is anything from 4 to QUIC_MAX_CONN_ID_LEN+4  */
+    char integrity_tag[QUIC_RETRY_INTEGRITY_TAG_LEN];
+	/* integrity_tag is just a placeholder */
+};
+
 DEFINE_LIST_OF_IMPL(ch, QUIC_CHANNEL);
 DEFINE_LIST_OF_IMPL(incoming_ch, QUIC_CHANNEL);
 DEFINE_LIST_OF_IMPL(port, QUIC_PORT);
@@ -569,6 +577,46 @@ static void port_on_new_conn(QUIC_PORT *port, const BIO_ADDR *peer,
     *new_ch = ch;
 }
 
+/*
+ * Handles an incoming connection request and potentially decides to make a
+ * connection from it. If a new connection is made, the new channel is written
+ * to *new_ch.
+ */
+static void port_bind_channel(QUIC_PORT *port, const BIO_ADDR *peer,
+                              const QUIC_CONN_ID *scid, const QUIC_CONN_ID *dcid,
+                              const QUIC_CONN_ID *odcid, QUIC_CHANNEL **new_ch)
+{
+    QUIC_CHANNEL *ch;
+
+    /*
+     * Need to figure out what to do for tserver yet.
+     * This chunk here was copied from port_on_new_conn(), if I understand
+     * things right, this is for testing. I still need to figure out how
+     * to adjust existing tests to cover address validation.
+     */
+    if (port->tserver_ch != NULL) {
+        /* Specially assign to existing channel */
+        if (!ossl_quic_channel_on_new_conn(port->tserver_ch, peer, scid, dcid))
+            return;
+
+        *new_ch = port->tserver_ch;
+        port->tserver_ch = NULL;
+        return;
+    }
+
+    ch = port_make_channel(port, NULL, /*is_server=*/1);
+    if (ch == NULL)
+        return;
+
+    if (!ossl_quic_bind_channel(ch, peer, scid, dcid, odcid)) {
+        ossl_quic_channel_free(ch);
+        return;
+    }
+
+    ossl_list_incoming_ch_insert_tail(&port->incoming_channel_list, ch);
+    *new_ch = ch;
+}
+
 static int port_try_handle_stateless_reset(QUIC_PORT *port, const QUIC_URXE *e)
 {
     size_t i;
@@ -615,6 +663,107 @@ static int port_try_handle_stateless_reset(QUIC_PORT *port, const QUIC_URXE *e)
     return i > 0;
 }
 
+#define TOKEN_LEN (sizeof("openssltoken") + QUIC_RETRY_INTEGRITY_TAG_LEN - 1 + sizeof(unsigned char))
+static void port_send_retry(QUIC_PORT *port,
+                            BIO_ADDR *peer,
+                            QUIC_PKT_HDR *client_hdr)
+{
+    BIO_MSG msg[1];
+    char buffer[512];
+    WPACKET wpkt;
+    size_t written;
+    QUIC_PKT_HDR hdr;
+    struct validation_token token;
+    size_t token_len = TOKEN_LEN;
+    char *integrity_tag;
+    int ok;
+
+    /* TODO: generate proper validation token */
+    memcpy(token.token_buf, "openssltoken", sizeof("openssltoken") - 1);
+
+    token.token_odcid = client_hdr->dst_conn_id;
+    token_len += token.token_odcid.id_len;
+    integrity_tag = (char *)&token.token_odcid +
+        token.token_odcid.id_len + sizeof(token.token_odcid.id_len);
+    /*
+     * 17.2.5.1 Sending a Retry packet
+     *   dst ConnId is src ConnId we got from client
+     *   src ConnId comes from local conn ID manager
+     */
+    memset(&hdr, 0, sizeof(QUIC_PKT_HDR));
+    hdr.dst_conn_id = client_hdr->src_conn_id;
+    /*
+     * this is the random connection ID, we expect client is
+     * going to send the ID with next INITIAL packet which
+     * will also come with token we generate here.
+     */
+    ok = ossl_quic_lcidm_get_unused_cid(port->lcidm, &hdr.src_conn_id);
+    if (ok == 0)
+        return;
+ 
+    hdr.dst_conn_id = client_hdr->src_conn_id;
+    hdr.type = QUIC_PKT_TYPE_RETRY;
+    hdr.fixed = 1;
+    hdr.version = 1;
+    hdr.len = token_len;
+    hdr.data = (unsigned char *)&token;
+    ok = ossl_quic_calculate_retry_integrity_tag(port->engine->libctx,
+                                                 port->engine->propq, &hdr,
+                                                 &client_hdr->dst_conn_id,
+                                                 integrity_tag);
+    if (ok == 0)
+        return;
+
+    hdr.token = (unsigned char *)&token;
+    hdr.token_len = token_len;
+
+    msg[0].data = buffer;
+    msg[0].peer = peer;
+    msg[0].local = NULL;
+    msg[0].flags = 0;
+
+    ok = WPACKET_init_static_len(&wpkt, buffer, sizeof(buffer), 0);
+    if (ok == 0)
+        return;
+
+    ok = ossl_quic_wire_encode_pkt_hdr(&wpkt, client_hdr->dst_conn_id.id_len,
+                                       &hdr, NULL);
+    if (ok == 0)
+        return;
+
+    ok = WPACKET_get_total_written(&wpkt, &msg[0].data_len);
+    if (ok == 0)
+        return;
+
+    ok = WPACKET_finish(&wpkt);
+    if (ok == 0)
+        return;
+
+    BIO_sendmmsg(port->net_wbio, msg, sizeof(BIO_MSG), 1, 0, &written);
+}
+
+static int port_validate_token(QUIC_PKT_HDR *hdr, QUIC_CONN_ID *odcid)
+{
+    int valid;
+    struct validation_token *token;
+
+    memset(odcid, 0, sizeof(QUIC_CONN_ID));
+
+    token = (struct validation_token *)hdr->token;
+    if (token == NULL || hdr->token_len <= (TOKEN_LEN - QUIC_RETRY_INTEGRITY_TAG_LEN))
+        return 0;
+
+    valid = memcmp(token->token_buf, "openssltoken", sizeof("openssltoken") - 1);
+    if (valid != 0)
+        return 0;
+
+    odcid->id_len = token->token_odcid.id_len;
+    memcpy(odcid->id, token->token_odcid.id, token->token_odcid.id_len);
+
+    return 1;
+}
+
+extern void ossl_print_dcid(QUIC_CONN_ID *);
 /*
  * This is called by the demux when we get a packet not destined for any known
  * DCID.
@@ -626,6 +775,7 @@ static void port_default_packet_handler(QUIC_URXE *e, void *arg,
     PACKET pkt;
     QUIC_PKT_HDR hdr;
     QUIC_CHANNEL *ch = NULL, *new_ch = NULL;
+    QUIC_CONN_ID odcid;
 
     /* Don't handle anything if we are no longer running. */
     if (!ossl_quic_port_is_running(port))
@@ -638,8 +788,15 @@ static void port_default_packet_handler(QUIC_URXE *e, void *arg,
         && ossl_quic_lcidm_lookup(port->lcidm, dcid, NULL,
                                   (void **)&ch)) {
         assert(ch != NULL);
+        fprintf(stderr, "%s found channel for dcid:", __func__);
+        ossl_print_cid(dcid);
+        fprintf(stderr, "\n");
         ossl_quic_channel_inject(ch, e);
         return;
+    } else {
+        fprintf(stderr, "%s could not find channel for dcid: ", __func__);
+        ossl_print_cid(dcid);
+        fprintf(stderr, "\n");
     }
 
     /*
@@ -686,18 +843,47 @@ static void port_default_packet_handler(QUIC_URXE *e, void *arg,
         goto undesirable;
 
     /*
-     * Try to process this as a valid attempt to initiate a connection.
-     *
+     * TODO: there should be some logic similar to accounting half-open
+     * states in TCP. If we reach certain threshold, then we want to
+     * validate clients.
+     */
+#define VALIDATE_CLIENT	1
+    if (VALIDATE_CLIENT) {
+        if (hdr.token == NULL) {
+            port_send_retry(port, &e->peer, &hdr);
+            goto undesirable;
+        } else if (port_validate_token(&hdr, &odcid) == 0) {
+            goto undesirable;
+        } else {
+            port_bind_channel(port, &e->peer, &hdr.src_conn_id, &hdr.dst_conn_id,
+                              &odcid, &new_ch);
+        }
+    } else if (hdr.token == NULL || port_validate_token(&hdr, &odcid) == 1) {
+        /*
+         * client validation is optional. However if client presents
+         * token, then the token must be valid.
+         */
+        if (hdr.token != NULL) {
+            port_bind_channel(port, &e->peer, &hdr.src_conn_id, &hdr.dst_conn_id,
+                              &odcid, &new_ch);
+        } else {
+            /*
+             * Try to process this as a valid attempt to initiate a connection.
+             */
+            port_on_new_conn(port, &e->peer, &hdr.src_conn_id, &hdr.dst_conn_id,
+                             &new_ch);
+        }
+    }
+
+    /*
      * The channel will do all the LCID registration needed, but as an
      * optimization inject this packet directly into the channel's QRX for
      * processing without going through the DEMUX again.
      */
-    port_on_new_conn(port, &e->peer, &hdr.src_conn_id, &hdr.dst_conn_id,
-                     &new_ch);
-    if (new_ch != NULL)
+    if (new_ch != NULL) {
         ossl_qrx_inject_urxe(new_ch->qrx, e);
-
-    return;
+        return;
+    }
 
 undesirable:
     ossl_quic_demux_release_urxe(port->demux, e);
