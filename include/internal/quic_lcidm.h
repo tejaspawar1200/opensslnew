@@ -259,7 +259,7 @@ int ossl_quic_lcidm_debug_add(QUIC_LCIDM *lcidm, void *opaque,
 int ossl_quic_lcidm_get_unused_cid(QUIC_LCIDM *lcidm, QUIC_CONN_ID *cid);
 
 /*
- * Attempts to bind channel to connection id specified in `peer_dcid`.
+ * Attempts to bind channel to connection id specified in `lcid`.
  * This should be connection ID we did gnerate during client validation.
  */
 int ossl_quic_lcidm_bind_channel(QUIC_LCIDM *lcidm, void *opaque,
