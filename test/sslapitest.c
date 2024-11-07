@@ -10479,7 +10479,9 @@ static int test_set_tmp_dh(int idx)
 
     if (!TEST_true(SSL_set_min_proto_version(serverssl, TLS1_2_VERSION))
             || !TEST_true(SSL_set_max_proto_version(serverssl, TLS1_2_VERSION))
-            || !TEST_true(SSL_set_cipher_list(serverssl, "DHE-RSA-AES128-SHA")))
+            || !TEST_true(SSL_set_cipher_list(serverssl, "DHE-RSA-AES128-SHA"))
+            /* Make sure RFC 7919 isn't used in this test. */
+            || !TEST_true(SSL_set1_groups_list(serverssl, "P-256")))
         goto end;
 
     /*
@@ -10501,7 +10503,6 @@ static int test_set_tmp_dh(int idx)
     SSL_CTX_free(sctx);
     SSL_CTX_free(cctx);
     EVP_PKEY_free(dhpkey);
-
     return testresult;
 }
 
@@ -10590,6 +10591,8 @@ static int test_dh_auto(int idx)
             || !TEST_true(SSL_set_min_proto_version(serverssl, TLS1_2_VERSION))
             || !TEST_true(SSL_set_max_proto_version(serverssl, TLS1_2_VERSION))
             || !TEST_true(SSL_set_cipher_list(serverssl, ciphersuite))
+            /* Make sure RFC 7919 isn't used in this test. */
+            || !TEST_true(SSL_set1_groups_list(serverssl, "P-256"))
             || !TEST_true(SSL_set_cipher_list(clientssl, ciphersuite)))
         goto end;
 
@@ -10618,9 +10621,7 @@ static int test_dh_auto(int idx)
     SSL_CTX_free(sctx);
     SSL_CTX_free(cctx);
     EVP_PKEY_free(tmpkey);
-
     return testresult;
-
 }
 # endif /* OPENSSL_NO_DH */
 #endif /* OPENSSL_NO_TLS1_2 */
