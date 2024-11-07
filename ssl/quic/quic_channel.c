@@ -1716,6 +1716,21 @@ static int ch_generate_transport_params(QUIC_CHANNEL *ch)
     WPACKET wpkt;
     int wpkt_valid = 0;
     size_t buf_len = 0;
+    QUIC_CONN_ID *id_to_use = NULL;
+
+    /*
+     * We need to select which conneciton id to encode in the
+     * QUIC_TPARAM_ORIG_DCID transport parameter
+     * If we have an odcid, then this connection was established
+     * in response to a retry request, and we need to use the connection
+     * id sent in the first inital packet
+     * If we don't have an odcid, then this connection was established
+     * without a retry and the init_dcid is the connection we should use
+     */
+    if (ch->odcid.id_len == 0)
+        id_to_use = &ch->init_dcid;
+    else
+        id_to_use = &ch->odcid;
 
     if (ch->local_transport_params != NULL || ch->got_local_transport_params)
         goto err;
@@ -1734,12 +1749,17 @@ static int ch_generate_transport_params(QUIC_CHANNEL *ch)
 
     if (ch->is_server) {
         if (!ossl_quic_wire_encode_transport_param_cid(&wpkt, QUIC_TPARAM_ORIG_DCID,
-                                                       &ch->init_dcid))
+                                                       id_to_use))
             goto err;
 
         if (!ossl_quic_wire_encode_transport_param_cid(&wpkt, QUIC_TPARAM_INITIAL_SCID,
                                                        &ch->cur_local_cid))
             goto err;
+        if (ch->odcid.id_len != 0)
+            if (!ossl_quic_wire_encode_transport_param_cid(&wpkt,
+                                                           QUIC_TPARAM_RETRY_SCID,
+                                                           &ch->init_dcid))
+                goto err;
     } else {
         /* Client always uses an empty SCID. */
         if (ossl_quic_wire_encode_transport_param_bytes(&wpkt, QUIC_TPARAM_INITIAL_SCID,
@@ -3362,22 +3382,35 @@ static void ch_on_idle_timeout(QUIC_CHANNEL *ch)
     ch_record_state_transition(ch, QUIC_CHANNEL_STATE_TERMINATED);
 }
 
-/* Called when we, as a server, get a new incoming connection. */
-int ossl_quic_channel_on_new_conn(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
-                                  const QUIC_CONN_ID *peer_scid,
-                                  const QUIC_CONN_ID *peer_dcid)
+/**
+ * @brief Common handler for initializing a new QUIC connection.
+ *
+ * This function configures a QUIC channel (`QUIC_CHANNEL *ch`) for a new
+ * connection by setting the peer address, connection IDs, and necessary
+ * callbacks. It establishes initial secrets, sets up logging, and performs
+ * required transitions for the channel state.
+ *
+ * @param ch       Pointer to the QUIC channel being initialized.
+ * @param peer     Address of the peer to which the channel connects.
+ * @param peer_scid Peer-specified source connection ID.
+ * @param peer_dcid Peer-specified destination connection ID.
+ * @param peer_odcid Peer-specified original destination connection ID
+ *                   may be NULL if retry frame not sent to client
+ * @return         1 on success, 0 on failure to set required elements.
+ */
+static int ch_on_new_conn_common(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
+                                 const QUIC_CONN_ID *peer_scid,
+                                 const QUIC_CONN_ID *peer_dcid,
+                                 const QUIC_CONN_ID *peer_odcid)
 {
-    if (!ossl_assert(ch->state == QUIC_CHANNEL_STATE_IDLE && ch->is_server))
-        return 0;
-
-    /* Generate an Initial LCID we will use for the connection. */
-    if (!ossl_quic_lcidm_generate_initial(ch->lcidm, ch, &ch->cur_local_cid))
-        return 0;
-
     /* Note our newly learnt peer address and CIDs. */
     ch->cur_peer_addr   = *peer;
     ch->init_dcid       = *peer_dcid;
     ch->cur_remote_dcid = *peer_scid;
+    ch->odcid.id_len = 0;
+
+    if (peer_odcid != NULL)
+        ch->odcid = *peer_odcid;
 
     /* Inform QTX of peer address. */
     if (!ossl_quic_tx_packetiser_set_peer(ch->txp, &ch->cur_peer_addr))
@@ -3403,13 +3436,75 @@ int ossl_quic_channel_on_new_conn(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
         return 0;
 
     /* Register the peer ODCID in the LCIDM. */
-    if (!ossl_quic_lcidm_enrol_odcid(ch->lcidm, ch, &ch->init_dcid))
+    if (!ossl_quic_lcidm_enrol_odcid(ch->lcidm, ch, peer_odcid == NULL ?
+                                     &ch->init_dcid :
+                                     peer_odcid))
         return 0;
 
     /* Change state. */
     ch_record_state_transition(ch, QUIC_CHANNEL_STATE_ACTIVE);
     ch->doing_proactive_ver_neg = 0; /* not currently supported */
     return 1;
+}
+
+/* Called when we, as a server, get a new incoming connection. */
+int ossl_quic_channel_on_new_conn(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
+                                  const QUIC_CONN_ID *peer_scid,
+                                  const QUIC_CONN_ID *peer_dcid)
+{
+    if (!ossl_assert(ch->state == QUIC_CHANNEL_STATE_IDLE && ch->is_server))
+        return 0;
+
+    /* Generate an Initial LCID we will use for the connection. */
+    if (!ossl_quic_lcidm_generate_initial(ch->lcidm, ch, &ch->cur_local_cid))
+        return 0;
+
+    return ch_on_new_conn_common(ch, peer, peer_scid, peer_dcid, NULL);
+}
+
+/**
+ * Binds a QUIC channel to a specific peer's address and connection IDs.
+ *
+ * This function is used to establish a binding between a QUIC channel and a
+ * peer's address and connection IDs. The binding is performed only if the
+ * channel is idle and is on the server side. The peer's destination connection
+ * ID (`peer_dcid`) is mandatory, and the channel's current local connection ID
+ * is set to this value.
+ *
+ * @param ch          Pointer to the QUIC_CHANNEL structure representing the
+ *                    channel to be bound.
+ * @param peer        Pointer to a BIO_ADDR structure representing the peer's
+ *                    address.
+ * @param peer_scid   Pointer to the peer's source connection ID (QUIC_CONN_ID).
+ * @param peer_dcid   Pointer to the peer's destination connection ID
+ *                    (QUIC_CONN_ID). This must not be NULL.
+ * @param peer_odcid  Pointer to the original destination connection ID
+ *                    (QUIC_CONN_ID) chosen by the peer in its first initial
+ *                    packet received without a token.
+ *
+ * @return 1 on success, or 0 on failure if the conditions for binding are not
+ *         met (e.g., channel is not idle or not a server, or binding fails).
+ */
+int ossl_quic_bind_channel(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
+                           const QUIC_CONN_ID *peer_scid,
+                           const QUIC_CONN_ID *peer_dcid,
+                           const QUIC_CONN_ID *peer_odcid)
+{
+    if (peer_dcid == NULL)
+        return 0;
+
+    if (!ossl_assert(ch->state == QUIC_CHANNEL_STATE_IDLE && ch->is_server))
+        return 0;
+
+    ch->cur_local_cid = *peer_dcid;
+    if (!ossl_quic_lcidm_bind_channel(ch->lcidm, ch, peer_dcid))
+        return 0;
+
+    /*
+     * peer_odcid <=> is initial dst conn id chosen by peer in its
+     * first initial packet we received without token.
+     */
+    return ch_on_new_conn_common(ch, peer, peer_scid, peer_dcid, peer_odcid);
 }
 
 SSL *ossl_quic_channel_get0_ssl(QUIC_CHANNEL *ch)
