@@ -3462,6 +3462,29 @@ int ossl_quic_channel_on_new_conn(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
     return ch_on_new_conn_common(ch, peer, peer_scid, peer_dcid, NULL);
 }
 
+/**
+ * Binds a QUIC channel to a specific peer's address and connection IDs.
+ *
+ * This function is used to establish a binding between a QUIC channel and a
+ * peer's address and connection IDs. The binding is performed only if the
+ * channel is idle and is on the server side. The peer's destination connection
+ * ID (`peer_dcid`) is mandatory, and the channel's current local connection ID
+ * is set to this value.
+ *
+ * @param ch          Pointer to the QUIC_CHANNEL structure representing the
+ *                    channel to be bound.
+ * @param peer        Pointer to a BIO_ADDR structure representing the peer's
+ *                    address.
+ * @param peer_scid   Pointer to the peer's source connection ID (QUIC_CONN_ID).
+ * @param peer_dcid   Pointer to the peer's destination connection ID
+ *                    (QUIC_CONN_ID). This must not be NULL.
+ * @param peer_odcid  Pointer to the original destination connection ID
+ *                    (QUIC_CONN_ID) chosen by the peer in its first initial
+ *                    packet received without a token.
+ *
+ * @return 1 on success, or 0 on failure if the conditions for binding are not
+ *         met (e.g., channel is not idle or not a server, or binding fails).
+ */
 int ossl_quic_bind_channel(QUIC_CHANNEL *ch, const BIO_ADDR *peer,
                            const QUIC_CONN_ID *peer_scid,
                            const QUIC_CONN_ID *peer_dcid,
