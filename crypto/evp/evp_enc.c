@@ -440,6 +440,176 @@ static int evp_cipher_init_internal(EVP_CIPHER_CTX *ctx,
     return 1;
 }
 
+/*
+ * FIXME this function has a lot of common with evp_cipher_init_internal
+ * so we need to refactor both of them later
+ */
+static int evp_cipher_init_skey_internal(EVP_CIPHER_CTX *ctx,
+                                         const EVP_CIPHER *cipher,
+                                         const EVP_SKEY *key,
+                                         const unsigned char *iv, int enc,
+                                         const OSSL_PARAM params[])
+{
+    int iv_len = 0;
+    void *pkeydata = (key == NULL) ? NULL : key->keydata;
+    int ret;
+
+    /*
+     * enc == 1 means we are encrypting.
+     * enc == 0 means we are decrypting.
+     * enc == -1 means, use the previously initialised value for encrypt/decrypt
+     */
+    if (enc == -1) {
+        enc = ctx->encrypt;
+    } else {
+        if (enc)
+            enc = 1;
+        ctx->encrypt = enc;
+    }
+
+    if (cipher == NULL && ctx->cipher == NULL) {
+        ERR_raise(ERR_LIB_EVP, EVP_R_NO_CIPHER_SET);
+        return 0;
+    }
+
+    /*
+     * If there are engines involved then we throw an error
+     */
+    if (ctx->engine != NULL
+            || (cipher != NULL && cipher->origin == EVP_ORIG_METH)
+            || (cipher == NULL && ctx->cipher != NULL
+                               && ctx->cipher->origin == EVP_ORIG_METH)) {
+        ERR_raise(ERR_LIB_EVP, EVP_R_INITIALIZATION_ERROR);
+        return 0;
+    }
+    /*
+     * Ensure a context left lying around from last time is cleared
+     * (legacy code)
+     */
+    if (cipher != NULL && ctx->cipher != NULL) {
+        if (ctx->cipher->cleanup != NULL && !ctx->cipher->cleanup(ctx))
+            return 0;
+        OPENSSL_clear_free(ctx->cipher_data, ctx->cipher->ctx_size);
+        ctx->cipher_data = NULL;
+    }
+
+    /* Ensure a context left lying around from last time is cleared */
+    if (cipher != NULL && ctx->cipher != NULL) {
+        unsigned long flags = ctx->flags;
+
+        EVP_CIPHER_CTX_reset(ctx);
+        /* Restore encrypt and flags */
+        ctx->encrypt = enc;
+        ctx->flags = flags;
+    }
+
+    if (cipher == NULL)
+        cipher = ctx->cipher;
+
+    if (cipher->prov == NULL) {
+        /* We only do explicit fetches inside the FIPS module */
+        ERR_raise(ERR_LIB_EVP, EVP_R_INITIALIZATION_ERROR);
+        return 0;
+    }
+
+    if (cipher != ctx->fetched_cipher) {
+        if (!EVP_CIPHER_up_ref((EVP_CIPHER *)cipher)) {
+            ERR_raise(ERR_LIB_EVP, EVP_R_INITIALIZATION_ERROR);
+            return 0;
+        }
+        EVP_CIPHER_free(ctx->fetched_cipher);
+        /* Coverity false positive, the reference counting is confusing it */
+        /* coverity[use_after_free] */
+        ctx->fetched_cipher = (EVP_CIPHER *)cipher;
+    }
+    ctx->cipher = cipher;
+    if (ctx->algctx == NULL) {
+        ctx->algctx = ctx->cipher->newctx(ossl_provider_ctx(cipher->prov));
+        if (ctx->algctx == NULL) {
+            ERR_raise(ERR_LIB_EVP, EVP_R_INITIALIZATION_ERROR);
+            return 0;
+        }
+    }
+
+    if (key != NULL && ctx->cipher->prov != key->keymgmt->prov) {
+        ERR_raise(ERR_LIB_EVP, EVP_R_INITIALIZATION_ERROR);
+        return 0;
+    }
+
+    if ((ctx->flags & EVP_CIPH_NO_PADDING) != 0) {
+        /*
+         * If this ctx was already set up for no padding then we need to tell
+         * the new cipher about it.
+         */
+        if (!EVP_CIPHER_CTX_set_padding(ctx, 0))
+            return 0;
+    }
+
+#ifndef FIPS_MODULE
+    /*
+     * Fix for CVE-2023-5363
+     * Passing in a size as part of the init call takes effect late
+     * so, force such to occur before the initialisation.
+     *
+     * The FIPS provider's internal library context is used in a manner
+     * such that this is not an issue.
+     */
+    if (params != NULL) {
+        OSSL_PARAM param_lens[3] = { OSSL_PARAM_END, OSSL_PARAM_END,
+                                     OSSL_PARAM_END };
+        OSSL_PARAM *q = param_lens;
+        const OSSL_PARAM *p;
+
+        p = OSSL_PARAM_locate_const(params, OSSL_CIPHER_PARAM_KEYLEN); 
+        if (p != NULL)
+            memcpy(q++, p, sizeof(*q));
+
+        /*
+         * Note that OSSL_CIPHER_PARAM_AEAD_IVLEN is a synonym for
+         * OSSL_CIPHER_PARAM_IVLEN so both are covered here.
+         */
+        p = OSSL_PARAM_locate_const(params, OSSL_CIPHER_PARAM_IVLEN);
+        if (p != NULL)
+            memcpy(q++, p, sizeof(*q));
+
+        if (q != param_lens) {
+            if (!EVP_CIPHER_CTX_set_params(ctx, param_lens)) {
+                ERR_raise(ERR_LIB_EVP, EVP_R_INVALID_LENGTH);
+                return 0;
+            }
+        }
+    }
+#endif
+    iv_len = iv == NULL ? 0 : EVP_CIPHER_CTX_get_iv_length(ctx);
+
+    if (enc) {
+        if (ctx->cipher->einit_opaque == NULL) {
+            ERR_raise(ERR_LIB_EVP, EVP_R_INITIALIZATION_ERROR);
+            return 0;
+        }
+
+        ret = ctx->cipher->einit_opaque(ctx->algctx, pkeydata,
+                                        iv, iv_len, params);
+    }
+
+    if (ctx->cipher->dinit_opaque == NULL) {
+        ERR_raise(ERR_LIB_EVP, EVP_R_INITIALIZATION_ERROR);
+        return 0;
+    }
+
+    ret = ctx->cipher->dinit_opaque(ctx->algctx, pkeydata,
+                                    iv, iv_len, params);
+
+    return ret;
+}
+
+int EVP_CipherInit_skey(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
+                        const EVP_SKEY *key, const unsigned char *iv,
+                        int enc, const OSSL_PARAM params[])
+{
+    return evp_cipher_init_skey_internal(ctx, cipher, key, iv, enc, params);
+}
+
 int EVP_CipherInit_ex2(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
                        const unsigned char *key, const unsigned char *iv,
                        int enc, const OSSL_PARAM params[])
