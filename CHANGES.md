@@ -32,7 +32,7 @@ OpenSSL 3.5
 
 * Add SLH-DSA as specified by FIPS 205.
 
- *Shane Lontis*
+  *Shane Lontis*
 
 * Support DEFAULT keyword and '-' prefix in SSL_CTX_set1_groups_list().
   SSL_CTX_set1_groups_list() now supports the DEFAULT keyword which sets the
