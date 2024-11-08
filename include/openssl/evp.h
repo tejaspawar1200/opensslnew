@@ -800,6 +800,9 @@ __owur int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx,
                                  const EVP_CIPHER *cipher, ENGINE *impl,
                                  const unsigned char *key,
                                  const unsigned char *iv, int enc);
+__owur int EVP_CipherInit_skey(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
+                               const EVP_SKEY *skey, const unsigned char *iv,
+                               int enc, const OSSL_PARAM params[]);
 __owur int EVP_CipherInit_ex2(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
                               const unsigned char *key, const unsigned char *iv,
                               int enc, const OSSL_PARAM params[]);
@@ -2225,6 +2228,12 @@ int EVP_PKEY_get_group_name(const EVP_PKEY *pkey, char *name, size_t name_sz,
 OSSL_LIB_CTX *EVP_PKEY_CTX_get0_libctx(EVP_PKEY_CTX *ctx);
 const char *EVP_PKEY_CTX_get0_propq(const EVP_PKEY_CTX *ctx);
 const OSSL_PROVIDER *EVP_PKEY_CTX_get0_provider(const EVP_PKEY_CTX *ctx);
+
+EVP_SKEY *EVP_SKEY_new(OSSL_LIB_CTX *libctx, const char *name, const char *propquery);
+int EVP_SKEY_fromdata(EVP_SKEY *pskey, const OSSL_PARAM *params);
+int EVP_SKEY_todata(const EVP_SKEY *pkey, OSSL_PARAM **params);
+int EVP_SKEY_up_ref(EVP_SKEY *pkey);
+void EVP_SKEY_free(EVP_SKEY *pkey);
 
 # ifdef  __cplusplus
 }

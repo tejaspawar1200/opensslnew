@@ -351,6 +351,9 @@ OSSL_CORE_MAKE_FUNC(const OSSL_PARAM *, digest_gettable_ctx_params,
 # define OSSL_FUNC_CIPHER_GETTABLE_PARAMS           12
 # define OSSL_FUNC_CIPHER_GETTABLE_CTX_PARAMS       13
 # define OSSL_FUNC_CIPHER_SETTABLE_CTX_PARAMS       14
+# define OSSL_FUNC_CIPHER_ENCRYPT_OPAQUE_INIT       15
+# define OSSL_FUNC_CIPHER_DECRYPT_OPAQUE_INIT       16
+# define OSSL_FUNC_CIPHER_FREE_SKEY                 17
 
 OSSL_CORE_MAKE_FUNC(void *, cipher_newctx, (void *provctx))
 OSSL_CORE_MAKE_FUNC(int, cipher_encrypt_init, (void *cctx,
@@ -389,6 +392,17 @@ OSSL_CORE_MAKE_FUNC(const OSSL_PARAM *, cipher_settable_ctx_params,
                     (void *cctx, void *provctx))
 OSSL_CORE_MAKE_FUNC(const OSSL_PARAM *, cipher_gettable_ctx_params,
                     (void *cctx, void *provctx))
+OSSL_CORE_MAKE_FUNC(int, cipher_encrypt_opaque_init, (void *cctx,
+                                                      void *pkeydata,
+                                                      const unsigned char *iv,
+                                                      size_t ivlen,
+                                                      const OSSL_PARAM params[]))
+OSSL_CORE_MAKE_FUNC(int, cipher_decrypt_opaque_init, (void *cctx,
+                                                      void *pkeydata,
+                                                      const unsigned char *iv,
+                                                      size_t ivlen,
+                                                      const OSSL_PARAM params[]))
+OSSL_CORE_MAKE_FUNC(void, cipher_freeskey, (void *ptr))
 
 /* MACs */
 
