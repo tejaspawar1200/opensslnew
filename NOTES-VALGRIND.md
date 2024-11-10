@@ -51,7 +51,7 @@ used to control what capabilities OpenSSL uses.
 As of valgrind-3.15.0 on Linux/x86_64, instructions up to AVX2 are
 supported. Setting the following disables instructions beyond AVX2:
 
-`OPENSSL_ia32cap=":0"`
+`OPENSSL_ia32cap=":0:0:0:0"`
 
 This variable may need to be set to something different based on the
 processor and Valgrind version you are running tests on. More information
