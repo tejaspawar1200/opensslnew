@@ -69,6 +69,13 @@ jobs:
       - name: save PR number
         run: echo ${{ github.event.number }} > ./artifact/pr_num
       - name: save artifact
+        if: github.server_url == 'https://github.com'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fips_checksum
+          path: artifact/
+      - name: save artifact
+        if: github.server_url != 'https://github.com'
         uses: actions/upload-artifact@v3
         with:
           name: fips_checksum
@@ -113,6 +120,13 @@ jobs:
       - name: save PR number
         run: echo ${{ github.event.number }} > ./artifact/pr_num
       - name: save artifact
+        if: github.server_url == 'https://github.com'
+        uses: actions/upload-artifact@v4
+        with:
+          name: abidiff
+          path: artifact/
+      - name: save artifact
+        if: github.server_url != 'https://github.com'
         uses: actions/upload-artifact@v3
         with:
           name: abidiff
