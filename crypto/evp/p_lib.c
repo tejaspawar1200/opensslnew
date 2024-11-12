@@ -2495,3 +2495,119 @@ int EVP_PKEY_get_field_type(const EVP_PKEY *pkey)
     return 0;
 }
 #endif
+
+/*- All methods below can also be used in FIPS_MODULE */
+
+int EVP_SKEY_fromdata(EVP_SKEY *pskey, const OSSL_PARAM *params)
+{
+    void *keydata = NULL;
+
+    if (pskey == NULL || pskey->keydata != NULL)
+        return -1;
+
+    if ((keydata = evp_keymgmt_newdata(pskey->keymgmt)) == NULL
+        || !evp_keymgmt_import(pskey->keymgmt, keydata, OSSL_KEYMGMT_SELECT_ALL, params)) {
+        evp_keymgmt_freedata(pskey->keymgmt, keydata);
+        keydata = NULL;
+    }
+
+    if (keydata == NULL)
+        return 0;
+
+    pskey->keydata = keydata;
+
+    return 1;
+}
+
+/* FIXME copy of ossl_pkey_todata_cb from crypto/evp/pmeth_gn.c */
+static OSSL_CALLBACK ossl_skey_todata_cb;
+
+static int ossl_skey_todata_cb(const OSSL_PARAM params[], void *arg)
+{
+    OSSL_PARAM **ret = arg;
+
+    *ret = OSSL_PARAM_dup(params);
+    return 1;
+}
+
+int EVP_SKEY_todata(const EVP_SKEY *skey, OSSL_PARAM **params)
+{
+    if (skey == NULL || params == NULL)
+        return 0;
+
+    return evp_keymgmt_export(skey->keymgmt, skey->keydata, OSSL_KEYMGMT_SELECT_ALL, 
+                              ossl_skey_todata_cb, params);
+}
+
+EVP_SKEY *EVP_SKEY_new(OSSL_LIB_CTX *libctx, const char *name, const char *propquery)
+{
+    EVP_SKEY *ret = OPENSSL_zalloc(sizeof(*ret));
+    EVP_KEYMGMT *keymgmt = NULL;
+
+    if (ret == NULL)
+        return NULL;
+
+    if (!CRYPTO_NEW_REF(&ret->references, 1))
+        goto err;
+
+    ret->lock = CRYPTO_THREAD_lock_new();
+    if (ret->lock == NULL) {
+        ERR_raise(ERR_LIB_EVP, ERR_R_CRYPTO_LIB);
+        goto err;
+    }
+
+    keymgmt = EVP_KEYMGMT_fetch(libctx, name, propquery);
+    if (keymgmt == NULL) {
+        ERR_raise(ERR_LIB_EVP, ERR_R_FETCH_FAILED);
+        goto err;
+    }
+
+    return ret;
+
+ err:
+    CRYPTO_FREE_REF(&ret->references);
+    CRYPTO_THREAD_lock_free(ret->lock);
+    EVP_KEYMGMT_free(keymgmt);
+    OPENSSL_free(ret);
+    return NULL;
+}
+
+int EVP_SKEY_up_ref(EVP_SKEY *pkey)
+{
+    int i;
+
+    if (CRYPTO_UP_REF(&pkey->references, &i) <= 0)
+        return 0;
+
+    REF_PRINT_COUNT("EVP_SKEY", pkey);
+    REF_ASSERT_ISNT(i < 2);
+    return ((i > 1) ? 1 : 0);
+}
+
+static void evp_skey_free_it(EVP_SKEY *x)
+{
+    if (x->keydata && x->keymgmt)
+        evp_keymgmt_freedata(x->keymgmt, x->keydata);
+
+    EVP_KEYMGMT_free(x->keymgmt);
+}
+
+void EVP_SKEY_free(EVP_SKEY *x)
+{
+    int i;
+
+    if (x == NULL)
+        return;
+
+    CRYPTO_DOWN_REF(&x->references, &i);
+    REF_PRINT_COUNT("EVP_SKEY", x);
+    if (i > 0)
+        return;
+    REF_ASSERT_ISNT(i < 0);
+    evp_skey_free_it(x);
+
+    CRYPTO_THREAD_lock_free(x->lock);
+    CRYPTO_FREE_REF(&x->references);
+    OPENSSL_free(x);
+}
+
