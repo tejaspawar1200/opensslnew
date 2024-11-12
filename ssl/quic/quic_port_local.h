@@ -26,6 +26,7 @@
  * Other components should not include this header.
  */
 DECLARE_LIST_OF(ch, QUIC_CHANNEL);
+DECLARE_LIST_OF(incoming_ch, QUIC_CHANNEL);
 
 /* A port is always in one of the following states: */
 enum {
@@ -62,6 +63,12 @@ struct quic_port_st {
     /* List of all child channels. */
     OSSL_LIST(ch)                   channel_list;
 
+    /*
+     * Queue of unaccepted incoming channels. Each such channel is also on
+     * channel_list.
+     */
+    OSSL_LIST(incoming_ch)          incoming_channel_list;
+
     /* Special TSERVER channel. To be removed in the future. */
     QUIC_CHANNEL                    *tserver_ch;
 
@@ -89,10 +96,17 @@ struct quic_port_st {
     unsigned int                    have_sent_any_pkt               : 1;
 
     /* Does this port allow incoming connections? */
-    unsigned int                    is_server                       : 1;
+    unsigned int                    allow_incoming                  : 1;
 
     /* Are we on the QUIC_ENGINE linked list of ports? */
     unsigned int                    on_engine_list                  : 1;
+
+    /* Are we using addressed mode (BIO_sendmmsg with non-NULL peer)? */
+    unsigned int                    addressed_mode_w                : 1;
+    unsigned int                    addressed_mode_r                : 1;
+
+    /* Has the BIO been changed since we last updated reactor pollability? */
+    unsigned int                    bio_changed                     : 1;
 };
 
 # endif

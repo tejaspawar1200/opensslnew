@@ -15,10 +15,15 @@
 # include "internal/quic_record_rx.h" /* OSSL_QRX */
 # include "internal/quic_ackm.h"      /* OSSL_ACKM */
 # include "internal/quic_channel.h"   /* QUIC_CHANNEL */
+# include "internal/quic_predef.h"
 
 # ifndef OPENSSL_NO_QUIC
 
 __owur SSL *ossl_quic_new(SSL_CTX *ctx);
+__owur SSL *ossl_quic_new_listener(SSL_CTX *ctx, uint64_t flags);
+__owur SSL *ossl_quic_new_listener_from(SSL *ssl, uint64_t flags);
+__owur SSL *ossl_quic_new_from_listener(SSL *ssl, uint64_t flags);
+__owur SSL *ossl_quic_new_domain(SSL_CTX *ctx, uint64_t flags);
 __owur int ossl_quic_init(SSL *s);
 void ossl_quic_deinit(SSL *s);
 void ossl_quic_free(SSL *s);
@@ -42,9 +47,6 @@ __owur const SSL_CIPHER *ossl_quic_get_cipher_by_char(const unsigned char *p);
 __owur int ossl_quic_num_ciphers(void);
 __owur const SSL_CIPHER *ossl_quic_get_cipher(unsigned int u);
 int ossl_quic_renegotiate_check(SSL *ssl, int initok);
-
-typedef struct quic_conn_st QUIC_CONNECTION;
-typedef struct quic_xso_st QUIC_XSO;
 
 int ossl_quic_do_handshake(SSL *s);
 void ossl_quic_set_connect_state(SSL *s);
@@ -75,6 +77,9 @@ __owur int ossl_quic_conn_set_initial_peer_addr(SSL *s,
                                                 const BIO_ADDR *peer_addr);
 __owur SSL *ossl_quic_conn_stream_new(SSL *s, uint64_t flags);
 __owur SSL *ossl_quic_get0_connection(SSL *s);
+__owur SSL *ossl_quic_get0_listener(SSL *s);
+__owur SSL *ossl_quic_get0_domain(SSL *s);
+__owur int ossl_quic_get_domain_flags(const SSL *s, uint64_t *domain_flags);
 __owur int ossl_quic_get_stream_type(SSL *s);
 __owur uint64_t ossl_quic_get_stream_id(SSL *s);
 __owur int ossl_quic_is_stream_local(SSL *s);
@@ -89,6 +94,9 @@ __owur int ossl_quic_get_value_uint(SSL *s, uint32_t class_, uint32_t id,
                                     uint64_t *value);
 __owur int ossl_quic_set_value_uint(SSL *s, uint32_t class_, uint32_t id,
                                     uint64_t value);
+__owur SSL *ossl_quic_accept_connection(SSL *ssl, uint64_t flags);
+__owur size_t ossl_quic_get_accept_connection_queue_len(SSL *ssl);
+__owur int ossl_quic_listen(SSL *ssl);
 
 __owur int ossl_quic_stream_reset(SSL *ssl,
                                   const SSL_STREAM_RESET_ARGS *args,
@@ -116,9 +124,9 @@ __owur int ossl_quic_set_write_buffer_size(SSL *s, size_t size);
  * overridden at any time, expect strange results if you change it after
  * connecting.
  */
-int ossl_quic_conn_set_override_now_cb(SSL *s,
-                                       OSSL_TIME (*now_cb)(void *arg),
-                                       void *now_cb_arg);
+int ossl_quic_set_override_now_cb(SSL *s,
+                                  OSSL_TIME (*now_cb)(void *arg),
+                                  void *now_cb_arg);
 
 /*
  * Condvar waiting in the assist thread doesn't support time faking as it relies
@@ -145,6 +153,9 @@ int ossl_quic_set_diag_title(SSL_CTX *ctx, const char *title);
 /* APIs used by the polling infrastructure */
 int ossl_quic_conn_poll_events(SSL *ssl, uint64_t events, int do_tick,
                                uint64_t *revents);
+int ossl_quic_get_notifier_fd(SSL *ssl);
+void ossl_quic_enter_blocking_section(SSL *ssl, QUIC_REACTOR_WAIT_CTX *wctx);
+void ossl_quic_leave_blocking_section(SSL *ssl, QUIC_REACTOR_WAIT_CTX *wctx);
 
 # endif
 

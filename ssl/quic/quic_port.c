@@ -11,6 +11,7 @@
 #include "internal/quic_channel.h"
 #include "internal/quic_lcidm.h"
 #include "internal/quic_srtm.h"
+#include "internal/ssl_unwrap.h"
 #include "quic_port_local.h"
 #include "quic_channel_local.h"
 #include "quic_engine_local.h"
@@ -30,6 +31,7 @@ static void port_default_packet_handler(QUIC_URXE *e, void *arg,
 static void port_rx_pre(QUIC_PORT *port);
 
 DEFINE_LIST_OF_IMPL(ch, QUIC_CHANNEL);
+DEFINE_LIST_OF_IMPL(incoming_ch, QUIC_CHANNEL);
 DEFINE_LIST_OF_IMPL(port, QUIC_PORT);
 
 QUIC_PORT *ossl_quic_port_new(const QUIC_PORT_ARGS *args)
@@ -93,6 +95,7 @@ static int port_init(QUIC_PORT *port)
 
     ossl_list_port_insert_tail(&port->engine->port_list, port);
     port->on_engine_list    = 1;
+    port->bio_changed       = 1;
     return 1;
 
 err:
@@ -175,6 +178,11 @@ int ossl_quic_port_get_tx_init_dcid_len(const QUIC_PORT *port)
     return port->tx_init_dcid_len;
 }
 
+size_t ossl_quic_port_get_num_incoming_channels(const QUIC_PORT *port)
+{
+    return ossl_list_incoming_ch_num(&port->incoming_channel_list);
+}
+
 /*
  * QUIC Port: Network BIO Configuration
  * ====================================
@@ -231,9 +239,12 @@ static int port_update_poll_desc(QUIC_PORT *port, BIO *net_bio, int for_write)
     return 1;
 }
 
-int ossl_quic_port_update_poll_descriptors(QUIC_PORT *port)
+int ossl_quic_port_update_poll_descriptors(QUIC_PORT *port, int force)
 {
     int ok = 1;
+
+    if (!force && !port->bio_changed)
+        return 0;
 
     if (!port_update_poll_desc(port, port->net_rbio, /*for_write=*/0))
         ok = 0;
@@ -241,7 +252,67 @@ int ossl_quic_port_update_poll_descriptors(QUIC_PORT *port)
     if (!port_update_poll_desc(port, port->net_wbio, /*for_write=*/1))
         ok = 0;
 
+    port->bio_changed = 0;
     return ok;
+}
+
+/*
+ * We need to determine our addressing mode. There are basically two ways we can
+ * use L4 addresses:
+ *
+ *   - Addressed mode, in which our BIO_sendmmsg calls have destination
+ *     addresses attached to them which we expect the underlying network BIO to
+ *     handle;
+ *
+ *   - Unaddressed mode, in which the BIO provided to us on the network side
+ *     neither provides us with L4 addresses nor is capable of honouring ones we
+ *     provide. We don't know where the QUIC traffic we send ends up exactly and
+ *     trust the application to know what it is doing.
+ *
+ * Addressed mode is preferred because it enables support for connection
+ * migration, multipath, etc. in the future. Addressed mode is automatically
+ * enabled if we are using e.g. BIO_s_datagram, with or without BIO_s_connect.
+ *
+ * If we are passed a BIO_s_dgram_pair (or some custom BIO) we may have to use
+ * unaddressed mode unless that BIO supports capability flags indicating it can
+ * provide and honour L4 addresses.
+ *
+ * Our strategy for determining address mode is simple: we probe the underlying
+ * network BIOs for their capabilities. If the network BIOs support what we
+ * need, we use addressed mode. Otherwise, we use unaddressed mode.
+ *
+ * If addressed mode is chosen, we require an initial peer address to be set. If
+ * this is not set, we fail. If unaddressed mode is used, we do not require
+ * this, as such an address is superfluous, though it can be set if desired.
+ */
+static void port_update_addressing_mode(QUIC_PORT *port)
+{
+    long rcaps = 0, wcaps = 0;
+
+    if (port->net_rbio != NULL)
+        rcaps = BIO_dgram_get_effective_caps(port->net_rbio);
+
+    if (port->net_wbio != NULL)
+        wcaps = BIO_dgram_get_effective_caps(port->net_wbio);
+
+    port->addressed_mode_r = ((rcaps & BIO_DGRAM_CAP_PROVIDES_SRC_ADDR) != 0);
+    port->addressed_mode_w = ((wcaps & BIO_DGRAM_CAP_HANDLES_DST_ADDR) != 0);
+    port->bio_changed = 1;
+}
+
+int ossl_quic_port_is_addressed_r(const QUIC_PORT *port)
+{
+    return port->addressed_mode_r;
+}
+
+int ossl_quic_port_is_addressed_w(const QUIC_PORT *port)
+{
+    return port->addressed_mode_w;
+}
+
+int ossl_quic_port_is_addressed(const QUIC_PORT *port)
+{
+    return ossl_quic_port_is_addressed_r(port) && ossl_quic_port_is_addressed_w(port);
 }
 
 /*
@@ -260,6 +331,7 @@ int ossl_quic_port_set_net_rbio(QUIC_PORT *port, BIO *net_rbio)
 
     ossl_quic_demux_set_bio(port->demux, net_rbio);
     port->net_rbio = net_rbio;
+    port_update_addressing_mode(port);
     return 1;
 }
 
@@ -277,6 +349,7 @@ int ossl_quic_port_set_net_wbio(QUIC_PORT *port, BIO *net_wbio)
         ossl_qtx_set_bio(ch->qtx, net_wbio);
 
     port->net_wbio = net_wbio;
+    port_update_addressing_mode(port);
     return 1;
 }
 
@@ -290,6 +363,11 @@ static SSL *port_new_handshake_layer(QUIC_PORT *port)
     SSL *tls = NULL;
     SSL_CONNECTION *tls_conn = NULL;
 
+    /*
+     * TODO(QUIC SERVER): NULL below needs to be replaced with a real user SSL
+     * object of either the listener or the domain which is associated with
+     * the port. https://github.com/openssl/project/issues/918
+     */
     tls = ossl_ssl_connection_new_int(port->channel_ctx, NULL, TLS_method());
     if (tls == NULL || (tls_conn = SSL_CONNECTION_FROM_SSL(tls)) == NULL)
         return NULL;
@@ -329,6 +407,7 @@ static QUIC_CHANNEL *port_make_channel(QUIC_PORT *port, SSL *tls, int is_server)
         return NULL;
     }
 
+    ossl_qtx_set_bio(ch->qtx, port->net_wbio);
     return ch;
 }
 
@@ -345,8 +424,46 @@ QUIC_CHANNEL *ossl_quic_port_create_incoming(QUIC_PORT *port, SSL *tls)
 
     ch = port_make_channel(port, tls, /*is_server=*/1);
     port->tserver_ch = ch;
-    port->is_server  = 1;
+    port->allow_incoming = 1;
     return ch;
+}
+
+QUIC_CHANNEL *ossl_quic_port_pop_incoming(QUIC_PORT *port)
+{
+    QUIC_CHANNEL *ch;
+
+    ch = ossl_list_incoming_ch_head(&port->incoming_channel_list);
+    if (ch == NULL)
+        return NULL;
+
+    ossl_list_incoming_ch_remove(&port->incoming_channel_list, ch);
+    return ch;
+}
+
+int ossl_quic_port_have_incoming(QUIC_PORT *port)
+{
+    return ossl_list_incoming_ch_head(&port->incoming_channel_list) != NULL;
+}
+
+void ossl_quic_port_drop_incoming(QUIC_PORT *port)
+{
+    QUIC_CHANNEL *ch;
+    SSL *tls;
+
+    for (;;) {
+        ch = ossl_quic_port_pop_incoming(port);
+        if (ch == NULL)
+            break;
+
+        tls = ossl_quic_channel_get0_tls(ch);
+        ossl_quic_channel_free(ch);
+        SSL_free(tls);
+    }
+}
+
+void ossl_quic_port_set_allow_incoming(QUIC_PORT *port, int allow_incoming)
+{
+    port->allow_incoming = allow_incoming;
 }
 
 /*
@@ -363,9 +480,10 @@ void ossl_quic_port_subtick(QUIC_PORT *port, QUIC_TICK_RESULT *res,
 {
     QUIC_CHANNEL *ch;
 
-    res->net_read_desired   = 0;
-    res->net_write_desired  = 0;
-    res->tick_deadline      = ossl_time_infinite();
+    res->net_read_desired       = ossl_quic_port_is_running(port);
+    res->net_write_desired      = 0;
+    res->notify_other_threads   = 0;
+    res->tick_deadline          = ossl_time_infinite();
 
     if (!port->engine->inhibit_tick) {
         /* Handle any incoming data from network. */
@@ -403,7 +521,7 @@ static void port_rx_pre(QUIC_PORT *port)
      * Therefore, this check is essential as we do not require our API users to
      * bind a socket first when using the API in client mode.
      */
-    if (!port->is_server && !port->have_sent_any_pkt)
+    if (!port->allow_incoming && !port->have_sent_any_pkt)
         return;
 
     /*
@@ -431,6 +549,8 @@ static void port_on_new_conn(QUIC_PORT *port, const BIO_ADDR *peer,
                              const QUIC_CONN_ID *dcid,
                              QUIC_CHANNEL **new_ch)
 {
+    QUIC_CHANNEL *ch;
+
     if (port->tserver_ch != NULL) {
         /* Specially assign to existing channel */
         if (!ossl_quic_channel_on_new_conn(port->tserver_ch, peer, scid, dcid))
@@ -440,6 +560,18 @@ static void port_on_new_conn(QUIC_PORT *port, const BIO_ADDR *peer,
         port->tserver_ch = NULL;
         return;
     }
+
+    ch = port_make_channel(port, NULL, /*is_server=*/1);
+    if (ch == NULL)
+        return;
+
+    if (!ossl_quic_channel_on_new_conn(ch, peer, scid, dcid)) {
+        ossl_quic_channel_free(ch);
+        return;
+    }
+
+    ossl_list_incoming_ch_insert_tail(&port->incoming_channel_list, ch);
+    *new_ch = ch;
 }
 
 static int port_try_handle_stateless_reset(QUIC_PORT *port, const QUIC_URXE *e)
@@ -517,14 +649,9 @@ static void port_default_packet_handler(QUIC_URXE *e, void *arg,
 
     /*
      * If we have an incoming packet which doesn't match any existing connection
-     * we assume this is an attempt to make a new connection. Currently we
-     * require our caller to have precreated a latent 'incoming' channel via
-     * TSERVER which then gets turned into the new connection.
-     *
-     * TODO(QUIC SERVER): In the future we will construct channels dynamically
-     * in this case.
+     * we assume this is an attempt to make a new connection.
      */
-    if (port->tserver_ch == NULL)
+    if (!port->allow_incoming)
         goto undesirable;
 
     /*

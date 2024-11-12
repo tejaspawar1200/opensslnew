@@ -11,6 +11,7 @@
 #include "internal/quic_tls.h"
 #include "../ssl_local.h"
 #include "internal/quic_error.h"
+#include "internal/ssl_unwrap.h"
 
 #define QUIC_TLS_FATAL(rl, ad, err) \
     do { \
@@ -51,6 +52,9 @@ struct quic_tls_st {
 
     /* Set if the handshake has completed */
     unsigned int complete : 1;
+
+    /* Set if we have consumed the local transport parameters yet. */
+    unsigned int local_transport_params_consumed : 1;
 };
 
 struct ossl_record_layer_st {
@@ -605,6 +609,7 @@ static int add_transport_params_cb(SSL *s, unsigned int ext_type,
 
     *out = qtls->local_transport_params;
     *outlen = qtls->local_transport_params_len;
+    qtls->local_transport_params_consumed = 1;
     return 1;
 }
 
@@ -832,6 +837,9 @@ int ossl_quic_tls_set_transport_params(QUIC_TLS *qtls,
                                        const unsigned char *transport_params,
                                        size_t transport_params_len)
 {
+    if (qtls->local_transport_params_consumed)
+        return 0;
+
     qtls->local_transport_params       = transport_params;
     qtls->local_transport_params_len   = transport_params_len;
     return 1;
